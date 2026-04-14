@@ -1,24 +1,23 @@
-FROM node:20-alpine
+# Use a newer, more secure base
+FROM node:22-alpine
 
-# 1. Update OS packages
+# 1. Update OS packages to fix libcrypto/libssl
 RUN apk update && apk upgrade --no-cache
 
-# 2. Update NPM globally to the latest version (This fixes the scan errors)
+# 2. Update NPM globally to fix the internal 'cross-spawn' and 'tar' issues
 RUN npm install -g npm@latest
 
 WORKDIR /app
 
-# 3. Copy dependencies
+# 3. Copy and Install with the overrides
 COPY package*.json ./
-
-# 4. Install production deps and run a security fix
-RUN npm install --production && npm audit fix --force
+RUN npm install --production
 
 COPY . .
 
-# 5. Non-root user for security
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
-RUN chown -R appuser:appgroup /app
+# 4. Security: Non-root user
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup && \
+    chown -R appuser:appgroup /app
 USER appuser
 
 EXPOSE 8080
