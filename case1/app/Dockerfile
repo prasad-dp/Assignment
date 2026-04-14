@@ -1,21 +1,24 @@
-# Use the latest stable and most secure Alpine base
+# Step 1: Use Node 22 (Newer base images have fewer legacy vulnerabilities)
 FROM node:22-alpine
 
-# 1. Update OS packages to fix libcrypto/libssl vulnerabilities
+# Step 2: Patch OS-level vulnerabilities (libcrypto/libssl)
 RUN apk update && apk upgrade --no-cache
 
-# 2. Update NPM globally to fix internal base-image vulnerabilities
-RUN npm install -g npm@latest
+# Step 3: FIX FOR THE 11 VULNERABILITIES
+# We must upgrade the global npm version to 10.9.2 or higher.
+# This replaces the vulnerable cross-spawn, glob, and tar inside /usr/local/lib
+RUN npm install -g npm@10.9.2
 
 WORKDIR /app
 
-# 3. Copy and install with the 'overrides' defined in package.json
+# Step 4: Install app dependencies with a security-first approach
 COPY package*.json ./
-RUN npm install --production
+# 'npm ci' is better for CI/CD as it uses the lockfile exactly
+RUN npm ci --only=production && npm audit fix --force
 
 COPY . .
 
-# 4. Security: Use non-root user
+# Step 5: Requirement: Non-root user
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup && \
     chown -R appuser:appgroup /app
 USER appuser
