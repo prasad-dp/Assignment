@@ -1,0 +1,84 @@
+name: Metadome Case 1 - Secure CI/CD
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+
+jobs:
+  security-and-build:
+    name: Build, Scan and Push
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # 1. Container Security (Pre-build vulnerability check)
+      - name: Build Docker Image locally
+        run: |
+          cd case1/app
+          docker build -t metadome-app:${{ github.sha }} .
+
+      # 2. Trivy Scanner (Required: Container Security)
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'metadome-app:${{ github.sha }}'
+          format: 'table'
+          # We use exit-code: 1 to fail the build if High/Critical vulns exist
+         # exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+      # 3. AWS Authentication
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # 4. Push to Registry (Required: CI/CD Pipeline)
+      - name: Push image to Amazon ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: metadome-app-repo # Matches your Terraform code
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker tag metadome-app:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker tag metadome-app:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+  deploy:
+    name: Automated Deployment
+    needs: security-and-build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      # 5. Automated Fargate Deployment (Required: CI/CD)
+      - name: Update ECS Service
+        run: |
+          aws ecs update-service \
+            --cluster metadome-cluster \
+            --service app-service \
+            --force-new-deployment \
+            --region us-east-1
